@@ -1,50 +1,54 @@
-# components/profile_screen.py
 from pathlib import Path
+from typing import Any, Dict, Optional
 import os
 
 from kivy.app import App
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.gridlayout import GridLayout
+from kivy.uix.button import Button
 from kivy.uix.image import Image
 from kivy.uix.label import Label
-from kivy.uix.button import Button
-from kivy.properties import NumericProperty, ObjectProperty, StringProperty
+from kivy.properties import DictProperty, NumericProperty, ObjectProperty, StringProperty
 from kivy.resources import resource_add_path, resource_find
 from kivy.graphics import Color, RoundedRectangle
 from kivy.utils import get_color_from_hex
 
-APP_DIR   = Path(__file__).resolve().parents[1]
+from services.api_client import ApiError
+from services.user_service import UserService
+
+APP_DIR = Path(__file__).resolve().parents[1]
 ICONS_DIR = APP_DIR / "assets" / "icons"
 resource_add_path(str(ICONS_DIR))
 
 PROFILE_ICON_PATH = "assets/icons/profile.png"
 
+
 class ProfilePanel(BoxLayout):
     user_id = NumericProperty(0)
-    db = ObjectProperty(None)
+    user_service = ObjectProperty(None)
 
-    user_name  = StringProperty("Пользователь")
+    user_name = StringProperty("Пользователь")
     user_email = StringProperty("email не указан")
+    user_data = DictProperty({})
 
-    def __init__(self, user_id=0, db=None, **kwargs):
+    def __init__(self, user_id: int = 0, user_service: Optional[UserService] = None,
+                 user_data: Optional[Dict[str, Any]] = None, **kwargs):
         super().__init__(**kwargs)
         self.orientation = "vertical"
         self.padding = [16, 16, 16, 16]
         self.spacing = 12
 
         self.user_id = int(user_id or 0)
-        self.db = db
-        self._load_user()
+        self.user_service = user_service
+        if user_data:
+            self.user_data = user_data
+        self._apply_user_data(self.user_data)
 
-        # ===== Весь контент по центру =====
         root_center = AnchorLayout(anchor_x="center", anchor_y="center")
         column = BoxLayout(orientation="vertical", spacing=16,
                            size_hint=(None, None), width=420)
-        # высота колонны будет подстраиваться под контент
         root_center.add_widget(column)
 
-        # ----- Аватар строго по центру -----
         avatar_holder = AnchorLayout(size_hint=(1, None), height=140)
         avatar_bg = AnchorLayout(size_hint=(None, None), width=120, height=120)
 
@@ -73,7 +77,6 @@ class ProfilePanel(BoxLayout):
         avatar_holder.add_widget(avatar_bg)
         column.add_widget(avatar_holder)
 
-        # ----- Имя и email по центру -----
         self.lbl_name = Label(
             text=self.user_name,
             font_size=24, bold=True,
@@ -93,7 +96,6 @@ class ProfilePanel(BoxLayout):
         column.add_widget(self.lbl_name)
         column.add_widget(self.lbl_email)
 
-        # ----- Кнопка выхода (пилюля) -----
         self.btn_logout = Button(
             text="Выйти из аккаунта",
             font_size=18, bold=True,
@@ -110,7 +112,6 @@ class ProfilePanel(BoxLayout):
             self._ring = RoundedRectangle(radius=[28, 28, 28, 28])
 
         def _repaint_btn(*_):
-            # центр кнопки в пределах column
             self._sh.pos = (self.btn_logout.x, self.btn_logout.y - 3)
             self._sh.size = (self.btn_logout.width, self.btn_logout.height)
             self._bg.pos = self.btn_logout.pos
@@ -128,22 +129,32 @@ class ProfilePanel(BoxLayout):
         self.btn_logout.bind(on_release=lambda *_: self._logout())
         column.add_widget(self.btn_logout)
 
-        # добавляем центрирующий контейнер в сам экран
         self.add_widget(root_center)
-
-        # обновим тексты из _load_user()
         self._refresh_labels()
 
-    # ---------- API для MainMenu ----------
-    def set_user(self, user_id: int):
-        self.user_id = int(user_id or 0)
-        self._load_user()
+        if not self.user_data and self.user_service and self.user_id:
+            self.refresh_from_api()
+
+    def update_user_data(self, user_data: Optional[Dict[str, Any]] = None, fetch_remote: bool = False) -> None:
+        if user_data is not None:
+            self.user_data = user_data or {}
+            self._apply_user_data(self.user_data)
+            self._refresh_labels()
+        if fetch_remote and self.user_service and self.user_id:
+            self.refresh_from_api()
+
+    def refresh_from_api(self) -> None:
+        if not (self.user_service and self.user_id):
+            return
+        try:
+            data = self.user_service.me()
+        except ApiError as exc:
+            print(f"[ProfilePanel] Не удалось обновить профиль: {exc.detail}")
+            return
+        self.user_data = data or {}
+        self._apply_user_data(self.user_data)
         self._refresh_labels()
 
-    def on_leave_panel(self):
-        pass
-
-    # ---------- Внутреннее ----------
     def _resolve_img(self, path_str: str) -> str:
         found = resource_find(path_str)
         if found and os.path.exists(found):
@@ -151,23 +162,9 @@ class ProfilePanel(BoxLayout):
         fallback = (ICONS_DIR / Path(path_str).name).as_posix()
         return fallback if os.path.exists(fallback) else ""
 
-    def _load_user(self):
-        """Подтянуть имя и email из БД (ORM-объект User)."""
-        name, email = "", ""
-        try:
-            if self.db and self.user_id:
-                rec = None
-                if hasattr(self.db, "get_user_by_id"):
-                    rec = self.db.get_user_by_id(self.user_id)
-                if rec is not None:
-                    # ORM объект: читаем атрибуты; запасной дефолт
-                    name = getattr(rec, "username", None) or getattr(rec, "name", "") or "Пользователь"
-                    email = getattr(rec, "email", None) or getattr(rec, "mail", "") or "email не указан"
-        except Exception:
-            pass
-
-        self.user_name = name or "Пользователь"
-        self.user_email = email or "email не указан"
+    def _apply_user_data(self, data: Dict[str, Any]) -> None:
+        self.user_name = data.get("username") or data.get("name") or "Пользователь"
+        self.user_email = data.get("email") or "email не указан"
 
     def _refresh_labels(self):
         self.lbl_name.text = self.user_name
@@ -175,13 +172,5 @@ class ProfilePanel(BoxLayout):
 
     def _logout(self):
         app = App.get_running_app()
-        try:
-            app.current_user_id = None
-        except Exception:
-            pass
-        try:
-            sm = app.root
-            if sm.has_screen('welcome'):
-                sm.current = 'welcome'
-        except Exception:
-            pass
+        if hasattr(app, "handle_logout"):
+            app.handle_logout()

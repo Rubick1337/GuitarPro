@@ -10,6 +10,9 @@ from kivy.graphics import Color, RoundedRectangle
 from kivy.properties import ObjectProperty, ListProperty
 from kivy.uix.popup import Popup
 
+from services.api_client import ApiError
+from services.auth_service import AuthService
+
 
 class RoundedButton(Button):
     bg_color = ListProperty([0.2, 0.6, 1, 1])
@@ -30,20 +33,16 @@ class RoundedButton(Button):
 
 
 class RegisterScreen(Screen):
-    # Определяем свойство db для Kivy
-    db = ObjectProperty(None)
+    auth_service = ObjectProperty(None)
 
-    def __init__(self, **kwargs):
-        # Инициализируем свойство db до вызова super()
-        if 'db' in kwargs:
-            self.db = kwargs.pop('db')
+    def __init__(self, auth_service: AuthService, **kwargs):
         super().__init__(**kwargs)
+        self.auth_service = auth_service
 
         Window.clearcolor = get_color_from_hex('#000000')
 
         main_layout = BoxLayout(orientation='vertical', padding=20, spacing=15)
 
-        # Кнопка назад
         back_button = Button(
             text="Назад",
             size_hint=(None, None),
@@ -60,7 +59,6 @@ class RegisterScreen(Screen):
 
         main_layout.add_widget(back_container)
 
-        # Изображение гитары
         guitar_image = Image(
             source='guitar.png',
             size_hint=(1, 0.2),
@@ -69,7 +67,6 @@ class RegisterScreen(Screen):
         )
         main_layout.add_widget(guitar_image)
 
-        # Заголовок
         title_label = Label(
             text="Регистрация",
             font_size=28,
@@ -79,7 +76,6 @@ class RegisterScreen(Screen):
         )
         main_layout.add_widget(title_label)
 
-        # Контейнер формы
         form_container = BoxLayout(
             orientation='vertical',
             spacing=8,
@@ -87,7 +83,6 @@ class RegisterScreen(Screen):
             padding=[40, 10, 40, 10]
         )
 
-        # Поле для имени пользователя
         username_label = Label(
             text="Имя пользователя",
             font_size=14,
@@ -112,7 +107,6 @@ class RegisterScreen(Screen):
 
         form_container.add_widget(BoxLayout(size_hint=(1, 0.02)))
 
-        # Поле для email
         email_label = Label(
             text="Электронная почта",
             font_size=14,
@@ -137,7 +131,6 @@ class RegisterScreen(Screen):
 
         form_container.add_widget(BoxLayout(size_hint=(1, 0.02)))
 
-        # Поле для пароля
         password_label = Label(
             text="Пароль",
             font_size=12,
@@ -163,7 +156,6 @@ class RegisterScreen(Screen):
 
         form_container.add_widget(BoxLayout(size_hint=(1, 0.02)))
 
-        # Поле для подтверждения пароля
         confirm_password_label = Label(
             text="Подтвердите пароль",
             font_size=12,
@@ -189,7 +181,6 @@ class RegisterScreen(Screen):
 
         form_container.add_widget(BoxLayout(size_hint=(1, 0.04)))
 
-        # Кнопка регистрации
         btn_register = RoundedButton(
             text="ЗАРЕГИСТРИРОВАТЬСЯ",
             size_hint=(1, 0.3),
@@ -198,66 +189,47 @@ class RegisterScreen(Screen):
             bg_color=get_color_from_hex('#4A90A4'),
             bold=True
         )
-        btn_register.bind(on_press=self.perform_registration)
+        btn_register.bind(on_press=self.perform_register)
         form_container.add_widget(btn_register)
 
         main_layout.add_widget(form_container)
         self.add_widget(main_layout)
 
-    def go_back(self, instance):
-        print("Возврат на WelcomeScreen")
+    def go_back(self, _instance):
         self.manager.current = 'welcome'
 
-    def perform_registration(self, instance):
-        username = self.username_input.text.strip()
-        email = self.email_input.text.strip()
-        password = self.password_input.text
-        confirm_password = self.confirm_password_input.text
+    def show_message(self, title, message):
+        content = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        content.add_widget(Label(text=message))
+        btn_ok = Button(text='OK', size_hint_y=None, height=40)
+        popup = Popup(title=title, content=content, size_hint=(0.7, 0.4))
+        btn_ok.bind(on_press=popup.dismiss)
+        content.add_widget(btn_ok)
+        popup.open()
 
-        print(f"Попытка регистрации: {email}, {username}")
+    def perform_register(self, _instance):
+        username = (self.username_input.text or "").strip()
+        email = (self.email_input.text or "").strip().lower()
+        password = self.password_input.text or ""
+        confirm_password = self.confirm_password_input.text or ""
 
-        # Валидация данных
-        if not all([username, email, password, confirm_password]):
-            self.show_message("Ошибка", "Заполните все поля")
+        if not email or not password:
+            self.show_message("Ошибка", "Email и пароль обязательны")
             return
 
         if password != confirm_password:
             self.show_message("Ошибка", "Пароли не совпадают")
             return
 
-        if len(password) < 4:
-            self.show_message("Ошибка", "Пароль должен содержать минимум 4 символа")
+        if not self.auth_service:
+            self.show_message("Ошибка", "Сервис регистрации недоступен")
             return
 
-        if '@' not in email:
-            self.show_message("Ошибка", "Введите корректный email")
+        try:
+            self.auth_service.register(email, password, username=username or None)
+        except ApiError as exc:
+            self.show_message("Ошибка", str(exc.detail or exc))
             return
 
-        if self.db:
-            success, message = self.db.register_user(email, password, username)
-
-            if success:
-                self.show_message("Успех", message)
-                # Очищаем поля после успешной регистрации
-                self.username_input.text = ""
-                self.email_input.text = ""
-                self.password_input.text = ""
-                self.confirm_password_input.text = ""
-                # Возвращаемся на экран приветствия
-                self.manager.current = 'welcome'
-            else:
-                self.show_message("Ошибка", message)
-        else:
-            self.show_message("Ошибка", "База данных не доступна")
-
-    def show_message(self, title, message):
-        """Показывает всплывающее окно с сообщением"""
-        content = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        content.add_widget(Label(text=message))
-
-        btn_ok = Button(text='OK', size_hint_y=None, height=40)
-        popup = Popup(title=title, content=content, size_hint=(0.7, 0.4))
-        btn_ok.bind(on_press=popup.dismiss)
-        content.add_widget(btn_ok)
-
-        popup.open()
+        self.show_message("Успех", "Регистрация прошла успешно. Теперь можно войти")
+        self.manager.current = 'login'

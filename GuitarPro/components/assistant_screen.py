@@ -11,7 +11,7 @@ from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
 from kivy.clock import Clock
-from kivy.properties import NumericProperty
+from kivy.properties import NumericProperty, ObjectProperty
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.spinner import Spinner
@@ -164,11 +164,14 @@ from controller.chat_controller import ChatController
 class AssistantPanel(BoxLayout):
     """Экран ассистента без загрузочного спиннера."""
     user_id = NumericProperty(0)
+    controller = ObjectProperty(None)
 
-    def __init__(self, user_id: int = 0, **kwargs):
+    def __init__(self, user_id: int = 0, chat_controller: Optional[ChatController] = None, **kwargs):
         super().__init__(**kwargs)
-        self.user_id = user_id
-        self.controller = ChatController()
+        if chat_controller is None:
+            raise ValueError("AssistantPanel требует chat_controller для работы с API")
+        self.user_id = int(user_id or 0)
+        self.controller = chat_controller
         self.orientation = 'vertical'
         self.padding = [12, 12, 12, 8]
         self.spacing = 8
@@ -328,11 +331,21 @@ class AssistantPanel(BoxLayout):
         s = (s or "").strip()
         return s if len(s) <= max_len else (s[:max_len - 1] + "…")
 
+    def set_user(self, user_id: int) -> None:
+        new_id = int(user_id or 0)
+        if new_id == self.user_id:
+            return
+        self.user_id = new_id
+        self._current_chat_id = None
+        self.msgs.clear_widgets()
+        self._reload_chats_for_user(init_select=True)
+
     def _reload_chats_for_user(self, init_select=False):
         self.chat_spinner.values = []
         self._ids = []
         self._titles = []
         if not self.user_id:
+            self.chat_spinner.text = "Выберите чат"
             return
 
         ok, payload = self.controller.list_user_chats(self.user_id)
@@ -355,6 +368,8 @@ class AssistantPanel(BoxLayout):
                 self._switch_chat(self._ids[0])
             else:
                 self._create_new_chat()
+        elif not self._titles:
+            self.chat_spinner.text = "Выберите чат"
 
     def _extract_id(self, spinner_text: str) -> Optional[int]:
         try:
