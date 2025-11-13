@@ -1,4 +1,3 @@
-# components/login_screen.py
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
@@ -11,7 +10,9 @@ from kivy.graphics import Color, RoundedRectangle
 from kivy.properties import ObjectProperty, ListProperty
 from kivy.uix.popup import Popup
 from kivy.app import App
-import re
+
+from services.api_client import ApiError
+from services.auth_service import AuthService
 
 
 class RoundedButton(Button):
@@ -32,20 +33,16 @@ class RoundedButton(Button):
 
 
 class LoginScreen(Screen):
-    # Инстанс DatabaseHandler прокидывается из App/Router
-    db = ObjectProperty(None)
+    auth_service = ObjectProperty(None)
 
-    def __init__(self, **kwargs):
-        # Вытаскиваем db из kwargs до super()
-        if 'db' in kwargs:
-            self.db = kwargs.pop('db')
+    def __init__(self, auth_service: AuthService, **kwargs):
         super().__init__(**kwargs)
+        self.auth_service = auth_service
 
         Window.clearcolor = get_color_from_hex('#000000')
 
         main_layout = BoxLayout(orientation='vertical', padding=30, spacing=20)
 
-        # Кнопка "Назад"
         back_button = Button(
             text="Назад",
             size_hint=(None, None),
@@ -61,7 +58,6 @@ class LoginScreen(Screen):
         back_container.add_widget(Label())
         main_layout.add_widget(back_container)
 
-        # Картинка
         guitar_image = Image(
             source='guitar.png',
             size_hint=(1, 0.3),
@@ -70,7 +66,6 @@ class LoginScreen(Screen):
         )
         main_layout.add_widget(guitar_image)
 
-        # Заголовок
         title_label = Label(
             text="Введите данные",
             font_size=32,
@@ -80,7 +75,6 @@ class LoginScreen(Screen):
         )
         main_layout.add_widget(title_label)
 
-        # Форма
         form_container = BoxLayout(
             orientation='vertical',
             spacing=15,
@@ -88,7 +82,6 @@ class LoginScreen(Screen):
             padding=[50, 0, 50, 0]
         )
 
-        # Email
         email_label = Label(
             text="Введите почту",
             font_size=16,
@@ -113,7 +106,6 @@ class LoginScreen(Screen):
 
         form_container.add_widget(BoxLayout(size_hint=(1, 0.1)))
 
-        # Пароль
         password_label = Label(
             text="Введите пароль",
             font_size=16,
@@ -139,7 +131,6 @@ class LoginScreen(Screen):
 
         form_container.add_widget(BoxLayout(size_hint=(1, 0.2)))
 
-        # Кнопка входа
         btn_login = RoundedButton(
             text="ВХОД",
             size_hint=(1, 0.6),
@@ -154,11 +145,9 @@ class LoginScreen(Screen):
         main_layout.add_widget(form_container)
         self.add_widget(main_layout)
 
-    # --- Навигация ---
     def go_back(self, _instance):
         self.manager.current = 'welcome'
 
-    # --- Вспомогалки UI ---
     def show_message(self, title, message):
         content = BoxLayout(orientation='vertical', padding=10, spacing=10)
         content.add_widget(Label(text=message))
@@ -168,7 +157,6 @@ class LoginScreen(Screen):
         content.add_widget(btn_ok)
         popup.open()
 
-    # --- Основная логика входа ---
     def perform_login(self, _instance):
         email = (self.email_input.text or "").strip().lower()
         password = self.password_input.text or ""
@@ -176,47 +164,18 @@ class LoginScreen(Screen):
             self.show_message("Ошибка", "Заполните все поля")
             return
 
-        if not self.db:
-            self.show_message("Ошибка", "База данных не доступна")
+        if not self.auth_service:
+            self.show_message("Ошибка", "Сервис авторизации недоступен")
             return
 
-        success, payload = self.db.login_user(email, password)
-
-        if not success:
-            # payload — это текст ошибки
-            self.show_message("Ошибка", str(payload))
-            return
-
-        # ПОЛУЧАЕМ user_id:
-        user_id = None
-
-        # 1) Пытаемся достать пользователя напрямую (предпочтительно)
-        if hasattr(self.db, "get_user_by_email"):
-            try:
-                user_obj = self.db.get_user_by_email(email)
-                if user_obj and getattr(user_obj, "id", None) is not None:
-                    user_id = int(user_obj.id)
-            except Exception:
-                user_id = None
-
-        # 2) Резерв: пробуем вытащить ID из текстового сообщения (если login_user его возвращает в тексте)
-        if user_id is None and isinstance(payload, str):
-            # ожидаем шаблон вида: "... (ID: 1)" — выдёргиваем число
-            m = re.search(r"\(ID:\s*(\d+)\)", payload)
-            if m:
-                user_id = int(m.group(1))
-
-        if user_id is None:
-            self.show_message("Ошибка", "Не удалось определить ID пользователя после входа.")
-            return
-
-        # Чистим поля после удачного входа
-        self.email_input.text = ""
-        self.password_input.text = ""
-
-        # Открываем главное меню с передачей user_id
-        app = App.get_running_app()
         try:
-            app.open_main_menu(user_id)  # создаст/обновит MainMenuScreen и пробросит user_id в AssistantPanel
-        except Exception as e:
-            self.show_message("Ошибка", f"Не удалось открыть главное меню: {e}")
+            response = self.auth_service.login(email, password)
+        except ApiError as exc:
+            self.show_message("Ошибка", str(exc.detail or exc))
+            return
+
+        app = App.get_running_app()
+        if hasattr(app, "handle_login"):
+            app.handle_login(response)
+        else:
+            self.show_message("Ошибка", "Приложение не поддерживает авторизацию")

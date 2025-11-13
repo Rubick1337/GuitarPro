@@ -1,12 +1,12 @@
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.image import Image
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
-from kivy.uix.image import Image
 from kivy.core.window import Window
 from kivy.utils import get_color_from_hex
 from kivy.graphics import Color, RoundedRectangle
-from kivy.properties import ObjectProperty, ListProperty
+from kivy.properties import ListProperty
 
 
 class RoundedButton(Button):
@@ -28,13 +28,7 @@ class RoundedButton(Button):
 
 
 class WelcomeScreen(Screen):
-    # Определяем свойство db для Kivy
-    db = ObjectProperty(None)
-
     def __init__(self, **kwargs):
-        # Инициализируем свойство db до вызова super()
-        if 'db' in kwargs:
-            self.db = kwargs.pop('db')
         super().__init__(**kwargs)
 
         Window.clearcolor = get_color_from_hex('#000000')
@@ -92,8 +86,7 @@ class WelcomeScreen(Screen):
         btn_login.bind(on_press=self.show_login_message)
         button_container.add_widget(btn_login)
 
-        spacer = BoxLayout(size_hint=(1, 0.1))
-        button_container.add_widget(spacer)
+        button_container.add_widget(BoxLayout(size_hint=(1, 0.1)))
 
         new_user_label = Label(
             text="Впервые в GuitarPro?",
@@ -117,10 +110,8 @@ class WelcomeScreen(Screen):
         main_layout.add_widget(button_container)
         self.add_widget(main_layout)
 
-    def show_login_message(self, instance):
-        print("Кнопка 'ВХОД' нажата - переход на экран авторизации")
+    def show_login_message(self, _instance):
         self.manager.current = 'login'
 
-    def show_register_message(self, instance):
-        print("Кнопка 'НАЧАТЬ' нажата - переход на экран регистрации")
-        self.manager.current = 'register'  # Измените эту строку
+    def show_register_message(self, _instance):
+        self.manager.current = 'register'
